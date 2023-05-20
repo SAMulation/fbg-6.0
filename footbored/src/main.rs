@@ -102,9 +102,10 @@ async fn main() {
             }
         });
 
-    let routes = new_game.or(make_move).or(game_state).map(|reply| {
-        warp::reply::with_header(reply, "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
-    });
+    let routes = new_game
+        .or(make_move)
+        .or(game_state)
+        .with(warp::cors().allow_any_origin());
 
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
