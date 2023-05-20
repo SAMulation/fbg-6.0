@@ -102,10 +102,18 @@ async fn main() {
             }
         });
 
+    let cors = warp::cors()
+        .allow_origins(vec![
+            "https://tictac.thencandesigns.com",
+            "https://server.thencandesigns.com",
+        ])
+        .allow_methods(vec!["POST", "GET"])
+        .allow_headers(vec!["Content-Type"]);
+
     let routes = new_game
         .or(make_move)
         .or(game_state)
-        .with(warp::cors().allow_any_origin());
+        .with(cors);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
