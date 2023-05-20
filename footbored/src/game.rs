@@ -1,4 +1,5 @@
 use std::fmt;
+use uuid::Uuid;
 
 const SIZE: usize = 3;
 
@@ -20,6 +21,20 @@ impl fmt::Display for Cell {
 }
 
 type Board = [[Cell; SIZE]; SIZE];
+
+pub struct Player {
+    player_id: Uuid,
+    player_symbol: Cell,
+}
+
+impl Player {
+    pub fn new(id: Uuid, symbol: Cell) -> Self {
+        Player {
+            player_id: id,
+            player_symbol: symbol,
+        }
+    }
+}
 
 pub struct Game {
     board: Board,
