@@ -1,12 +1,12 @@
 #[macro_use]
 extern crate lazy_static;
-use warp::Filter;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use serde_derive::{Serialize, Deserialize};
 mod game;
 use game::{Game, Cell};
+use warp::{self, Filter, Reply};
 
 lazy_static! {
     static ref GAMES: Arc<Mutex<HashMap<Uuid, Game>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -47,34 +47,55 @@ async fn main() {
             })
         });
 
-    let make_move = warp::path!("game" / Uuid / "move")
-        .and(warp::post())
+        let make_move = warp::path!("game" / Uuid / "move")
+        .and(warp::filters::method::method())
         .and(warp::body::json())
-        .map(|game_id: Uuid, move_position: MovePosition| {
-            let mut games = GAMES.lock().unwrap();
-            if let Some(game) = games.get_mut(&game_id) {
-                if game.play(move_position.x, move_position.y) {
-                    let game_over = game.is_over();
-                    let winner = match game.get_winner() {
-                        Some(Cell::X) => Some("X".to_string()),
-                        Some(Cell::O) => Some("O".to_string()),
-                        _ => None,
-                    };
-                    warp::reply::json(&GameResponse {
-                        game_state: game.to_string(),
-                        game_id,
-                        game_over,
-                        winner,
-                    })
+        .map(|game_id: Uuid, method: warp::http::Method, move_position: MovePosition| {
+            if method == warp::http::Method::OPTIONS {
+                // Return a response with the necessary CORS headers for the OPTIONS request
+                warp::reply::with_header(
+                    "",
+                    "Access-Control-Allow-Origin",
+                    "https://tictac.thencandesigns.com",
+                )
+                .into_response()
+            } else if method == warp::http::Method::POST {
+                // Process the actual move request
+                let mut games = GAMES.lock().unwrap();
+                if let Some(game) = games.get_mut(&game_id) {
+                    if game.play(move_position.x, move_position.y) {
+                        let game_over = game.is_over();
+                        let winner = match game.get_winner() {
+                            Some(Cell::X) => Some("X".to_string()),
+                            Some(Cell::O) => Some("O".to_string()),
+                            _ => None,
+                        };
+                        warp::reply::json(&GameResponse {
+                            game_state: game.to_string(),
+                            game_id,
+                            game_over,
+                            winner,
+                        })
+                        .into_response()
+                    } else {
+                        warp::reply::json(&ErrorResponse {
+                            error: String::from("Invalid move"),
+                        })
+                        .into_response()
+                    }
                 } else {
                     warp::reply::json(&ErrorResponse {
-                        error: String::from("Invalid move"),
+                        error: String::from("Game not found"),
                     })
+                    .into_response()
                 }
             } else {
-                warp::reply::json(&ErrorResponse {
-                    error: String::from("Game not found"),
-                })
+                // Handle other methods if needed
+                warp::reply::with_status(
+                    "",
+                    warp::http::StatusCode::METHOD_NOT_ALLOWED,
+                )
+                .into_response()
             }
         });
 
