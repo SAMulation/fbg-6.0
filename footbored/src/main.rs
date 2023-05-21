@@ -152,27 +152,28 @@ async fn main() {
     
 
         let request_game = warp::path!("request_game")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|game_request: GameRequest| {
-            let mut players = PLAYERS.lock().unwrap();
-            let cloned_players = players.clone();
-            let mut player_requests = PLAYER_REQUESTS.lock().unwrap();
-    
-            if let Some(requesting_player) = players.get_mut(&game_request.player_id) {
-                if let Some(opponent_player) = cloned_players.get(&game_request.opponent_id) {
-                    requesting_player.requested_game_id = Some(game_request.game_id);
-                    let requests = player_requests.entry(game_request.game_id).or_insert(Vec::new());
-                    requests.push(requesting_player.id);
-    
-                    warp::reply::json(&RequestResponse::Approve)
+            .and(warp::post())
+            .and(warp::body::json())
+            .map(|game_request: GameRequest| {
+                let mut players = PLAYERS.lock().unwrap();
+                let cloned_players = players.clone();
+                let mut player_requests = PLAYER_REQUESTS.lock().unwrap();
+
+                if let Some(requesting_player) = players.get_mut(&game_request.player_id) {
+                    if let Some(opponent_player) = cloned_players.get(&game_request.opponent_id) {
+                        requesting_player.requested_game_id = Some(game_request.game_id);
+                        let requests = player_requests.entry(game_request.game_id).or_insert(Vec::new());
+                        requests.push(requesting_player.id);
+
+                        warp::reply::json(&RequestResponse::Approve)
+                    } else {
+                        warp::reply::json(&RequestResponse::Deny)
+                    }
                 } else {
                     warp::reply::json(&RequestResponse::Deny)
                 }
-            } else {
-                warp::reply::json(&RequestResponse::Deny)
-            }
-        });
+            });
+
     
 
         let handle_game_request = warp::path!("handle_game_request")
