@@ -38,6 +38,7 @@ struct ErrorResponse {
 #[derive(Clone, Serialize, Deserialize)]
 struct Player {
     id: Uuid,
+    name: String,
     requested_game_id: Option<Uuid>,
     playing_game_id: Option<Uuid>,
 }
@@ -136,17 +137,19 @@ async fn main() {
     let join_game = warp::path!("join_game")
         .and(warp::post())
         .and(warp::body::json())
-        .map(|_player_name: String| {
+        .map(|player_name: String| {
             let mut players = PLAYERS.lock().unwrap();
             let player_id = Uuid::new_v4();
             let player = Player {
                 id: player_id,
+                name: player_name,  // Set the player's name
                 requested_game_id: None,
                 playing_game_id: None,
             };
             players.insert(player_id, player);
             warp::reply::json(&player_id)
         });
+    
 
         let request_game = warp::path!("request_game")
         .and(warp::post())
@@ -194,9 +197,14 @@ async fn main() {
                 warp::reply::json(&RequestResponse::Deny)
             }
         });
-    
 
-    
+    let get_players = warp::path("players")
+        .and(warp::get())
+        .map(|| {
+            let players = PLAYERS.lock().unwrap();
+            let player_names: Vec<String> = players.values().map(|player| player.name.clone()).collect();
+            warp::reply::json(&player_names)
+        });
 
     let cors = warp::cors()
         .allow_origins(vec![
@@ -212,6 +220,7 @@ async fn main() {
         .or(join_game)
         .or(request_game)
         .or(handle_game_request)
+        .or(get_players)
         .with(cors);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
