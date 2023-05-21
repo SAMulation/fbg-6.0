@@ -1,266 +1,56 @@
-#[macro_use]
-extern crate lazy_static;
+// Import the necessary modules for our application
+use std::sync::{Arc, Mutex}; // Arc and Mutex for shared state across threads
+use tokio::sync::mpsc; // mpsc (multiple producer, single consumer) for async communication
+use uuid::Uuid; // Uuid for unique client identification
+use warp::{self, Filter}; // warp for creating the server and its routes
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use uuid::Uuid;
-use serde_derive::{Serialize, Deserialize};
-use warp::{self, Filter, log};
-
+// Import modules defined locally in our application
+mod game_server;
+mod client;
 mod game;
-use game::{Game, Cell};
 
-lazy_static! {
-    static ref GAMES: Arc<Mutex<HashMap<Uuid, Game>>> = Arc::new(Mutex::new(HashMap::new()));
-    static ref PLAYERS: Arc<Mutex<HashMap<Uuid, Player>>> = Arc::new(Mutex::new(HashMap::new()));
-}
+// Use the structures defined in these modules
+use client::Client;
+use game_server::GameServer;
 
-#[derive(Deserialize)]
-struct MovePosition {
-    _x: usize,
-    _y: usize,
-}
-
-#[derive(Deserialize)]
-struct NewGameRequest {
-    player1_id: Uuid,
-    player2_id: Uuid,
-}
-
-#[derive(Deserialize)]
-struct MoveData {
-    player_id: Uuid,
-    x: usize,
-    y: usize,
-}
-
-#[derive(Serialize)]
-struct GameResponse {
-    game_state: String,
-    game_id: Uuid,
-    game_over: bool,
-    winner: Option<String>,
-    players: Vec<Uuid>,
-}
-
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct Player {
-    id: Option<Uuid>,
-    name: String,
-    requested_game_id: Option<Uuid>,
-    playing_game_id: Option<Uuid>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct GameRequest {
-    player_id: Uuid,
-    opponent_id: Uuid,
-}
-
-#[derive(Serialize, Deserialize)]
-struct GameRequestResponse {
-    game_id: Uuid,
-    player_id: Uuid,
-    response: RequestResponse,
-}
-
-#[derive(Serialize, Deserialize, PartialEq)]
-enum RequestResponse {
-    Approve,
-    Deny,
-}
-
+// This is the main function, which is the entry point of the application
 #[tokio::main]
 async fn main() {
-    let new_game = warp::path!("new_game")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|new_game_request: NewGameRequest| {
-            let players = PLAYERS.lock().unwrap();
-            let player1_id = new_game_request.player1_id;
-            let player2_id = new_game_request.player2_id;
+    // Create an instance of the GameServer struct, and wrap it in an Arc Mutex for shared state
+    let game_server = Arc::new(Mutex::new(GameServer::new()));
 
-            // Check if both players exist
-            if let (Some(_player1), Some(_player2)) = (players.get(&player1_id), players.get(&player2_id)) {
-                let mut games = GAMES.lock().unwrap();
-                let game_id = Uuid::new_v4();
-                games.insert(game_id, Game::new(player1_id, player2_id));
+    // The game_server_filter is a warp Filter that we'll use in our routes. It clones the game server state
+    // for each incoming request
+    let game_server_filter = warp::any().map(move || game_server.clone());
 
-                let players = vec![player1_id, player2_id];
+    // Define the websocket route. This route is for the "/websocket" endpoint and upgrades the connection to a WebSocket.
+    // We pass along the game server state for each connection
+    let websocket_route = warp::path("websocket")
+        .and(warp::ws())
+        .and(game_server_filter.clone())
+        .map(|ws: warp::ws::Ws, game_server: Arc<Mutex<GameServer>>| {
+            // Split the WebSocket into a sender and receiver
+            let (ws_tx, ws_rx) = ws.split();
+            // Create a channel for chat communication
+            let (chat_sender, chat_receiver) = mpsc::unbounded_channel();
+            // Generate a unique id for the client
+            let client_id = Uuid::new_v4();
 
-                warp::reply::json(&GameResponse {
-                    game_state: games.get(&game_id).unwrap().to_string(),
-                    game_id,
-                    game_over: false,
-                    winner: None,
-                    players,
-                })
-            } else {
-                warp::reply::json(&ErrorResponse {
-                    error: String::from("Invalid player IDs"),
-                })
-            }
+            // Create a client instance
+            let client = Client {
+                id: client_id,
+                ws: ws_tx,
+                game_server: game_server.clone(),
+                chat_sender: Some(chat_sender),
+            };
+
+            // Handle the connection
+            Client::handle_connection(ws_rx, game_server, client, chat_receiver)
         });
 
+    // Define the routes for the warp server
+    let routes = websocket_route;
 
-    let make_move = warp::path!("game" / Uuid / "move")
-        .and(warp::filters::method::post())
-        .and(warp::body::json())
-        .map(|game_id: Uuid, move_data: MoveData| {
-            let mut games = GAMES.lock().unwrap();
-            if let Some(game) = games.get_mut(&game_id) {
-                let current_player_id = game.current_player_id();
-                if move_data.player_id == current_player_id {
-                    if game.play(move_data.player_id, move_data.x, move_data.y) {
-                        let game_over = game.is_over();
-                        let winner = match game.get_winner() {
-                            Some(Cell::X) => Some("X".to_string()),
-                            Some(Cell::O) => Some("O".to_string()),
-                            _ => None,
-                        };
-                        warp::reply::json(&GameResponse {
-                            game_state: game.to_string(),
-                            game_id,
-                            game_over,
-                            winner,
-                            players: game.players.clone(),
-                        })
-                    } else {
-                        warp::reply::json(&ErrorResponse {
-                            error: String::from("Invalid move"),
-                        })
-                    }
-                } else {
-                    warp::reply::json(&ErrorResponse {
-                        error: String::from("It's not your turn to play"),
-                    })
-                }
-            } else {
-                warp::reply::json(&ErrorResponse {
-                    error: String::from("Game not found"),
-                })
-            }
-        });
-
-    let game_state = warp::path!("game" / Uuid / "state")
-        .and(warp::get())
-        .map(|game_id: Uuid| {
-            let games = GAMES.lock().unwrap();
-
-            if let Some(game) = games.get(&game_id) {
-                let game_over = game.is_over();
-                let winner = match game.get_winner() {
-                    Some(Cell::X) => Some("X".to_string()),
-                    Some(Cell::O) => Some("O".to_string()),
-                    _ => None,
-                };
-
-                warp::reply::json(&GameResponse {
-                    game_state: game.to_string(),
-                    game_id,
-                    game_over,
-                    winner,
-                    players: game.players.clone(),
-                })
-            } else {
-                warp::reply::json(&ErrorResponse {
-                    error: String::from("Game not found"),
-                })
-            }
-        });
-
-    let join_game = warp::path!("join_game")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|mut player: Player| {
-            let mut players = PLAYERS.lock().unwrap();
-            let player_id = Uuid::new_v4();
-            player.id = Some(player_id);
-            players.insert(player_id, player.clone());
-            warp::reply::json(&player)
-        });
-
-    let request_game = warp::path!("request_game")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|game_request: GameRequest| {
-            let mut players = PLAYERS.lock().unwrap();
-            let mut games = GAMES.lock().unwrap();
-            let mut cloned_players = players.clone();
-            let player = players.get_mut(&game_request.player_id);
-            let opponent = cloned_players.get_mut(&game_request.opponent_id);
-
-            if let (Some(player), Some(opponent)) = (player, opponent) {
-                let game_id = Uuid::new_v4();
-                games.insert(game_id, Game::new(game_request.player_id, game_request.opponent_id));
-                player.playing_game_id = Some(game_id);
-                opponent.playing_game_id = Some(game_id);
-
-                warp::reply::with_header(
-                    warp::reply::json(&GameResponse {
-                        game_state: games.get(&game_id).unwrap().to_string(),
-                        game_id,
-                        game_over: false,
-                        winner: None,
-                        players: vec![game_request.player_id, game_request.opponent_id],
-                    }),
-                    "Access-Control-Allow-Origin",
-                    "https://tictac.thencandesigns.com",
-                )
-            } else {
-                warp::reply::with_header(
-                    warp::reply::json(&ErrorResponse {
-                        error: String::from("Player or opponent not found"),
-                    }),
-                    "Access-Control-Allow-Origin",
-                    "https://tictac.thencandesigns.com",
-                )
-            }
-        });
-
-    let get_players = warp::path!("players")
-        .and(warp::get())
-        .map(|| {
-            let players = PLAYERS.lock().unwrap();
-            let player_list: Vec<&Player> = players.values().collect();
-            warp::reply::json(&player_list)
-        });
-
-    let cors = warp::cors()
-        .allow_origins(vec![
-            "https://tictac.thencandesigns.com",
-            "https://server.thencandesigns.com",
-        ])
-        .allow_methods(vec!["POST", "GET"])
-        .allow_headers(vec!["Content-Type"]);
-
-    let log = warp::log::custom(|info| {
-        // Custom log format
-        println!(
-            "Host: {}, Method: {}, Path: {}, Status: {}, User-Agent: {}, Time: {}",
-            info.host().unwrap_or("unknown host"),
-            info.method(),
-            info.path(),
-            info.status().as_u16(),
-            info.user_agent().unwrap_or("unknown user_agent"),
-            // You can also add the timestamp
-            info.elapsed().as_secs_f64()
-        );
-    });
-    
-    let routes = new_game
-        .or(make_move)
-        .or(game_state)
-        .or(join_game)
-        .or(request_game)
-        .or(get_players)
-        .with(cors)
-        .with(log);
-
+    // Start the warp server on port 3030
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
