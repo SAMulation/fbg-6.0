@@ -22,6 +22,12 @@ struct MovePosition {
 }
 
 #[derive(Deserialize)]
+struct NewGameRequest {
+    player1_id: Uuid,
+    player2_id: Uuid,
+}
+
+#[derive(Deserialize)]
 struct MoveData {
     player_id: Uuid,
     x: usize,
@@ -35,6 +41,7 @@ struct GameResponse {
     game_id: Uuid,
     game_over: bool,
     winner: Option<String>,
+    players: Vec<Player>,
 }
 
 #[derive(Serialize)]
@@ -73,17 +80,34 @@ enum RequestResponse {
 async fn main() {
     let new_game = warp::path!("new_game")
         .and(warp::post())
-        .map(|| {
-            let mut games = GAMES.lock().unwrap();
-            let game_id = Uuid::new_v4();
-            games.insert(game_id, Game::new());
-            warp::reply::json(&GameResponse {
-                game_state: games.get(&game_id).unwrap().to_string(),
-                game_id,
-                game_over: false,
-                winner: None,
-            })
+        .and(warp::body::json())
+        .map(|new_game_request: NewGameRequest| {
+            let players = PLAYERS.lock().unwrap();
+            let player1_id = new_game_request.player1_id;
+            let player2_id = new_game_request.player2_id;
+            
+            // Check if both players exist
+            if let (Some(player1), Some(player2)) = (players.get(&player1_id), players.get(&player2_id)) {
+                let mut games = GAMES.lock().unwrap();
+                let game_id = Uuid::new_v4();
+                games.insert(game_id, Game::new());
+
+                let players = vec![player1.clone(), player2.clone()];
+
+                warp::reply::json(&GameResponse {
+                    game_state: games.get(&game_id).unwrap().to_string(),
+                    game_id,
+                    game_over: false,
+                    winner: None,
+                    players,
+                })
+            } else {
+                warp::reply::json(&ErrorResponse {
+                    error: String::from("Invalid player IDs"),
+                })
+            }
         });
+
 
     let make_move = warp::path!("game" / Uuid / "move")
         .and(warp::filters::method::post())
@@ -98,11 +122,15 @@ async fn main() {
                         Some(Cell::O) => Some("O".to_string()),
                         _ => None,
                     };
+                    
+                    let players = PLAYERS.lock().unwrap().values().cloned().collect();
+    
                     warp::reply::json(&GameResponse {
                         game_state: game.to_string(),
                         game_id,
                         game_over,
                         winner,
+                        players,
                     })
                 } else {
                     warp::reply::json(&ErrorResponse {
@@ -114,13 +142,15 @@ async fn main() {
                     error: String::from("Game not found"),
                 })
             }
-        });
+        });    
     
 
     let game_state = warp::path!("game" / Uuid / "state")
         .and(warp::get())
         .map(|game_id: Uuid| {
             let games = GAMES.lock().unwrap();
+            let players = PLAYERS.lock().unwrap();
+    
             if let Some(game) = games.get(&game_id) {
                 let game_over = game.is_over();
                 let winner = match game.get_winner() {
@@ -128,11 +158,22 @@ async fn main() {
                     Some(Cell::O) => Some("O".to_string()),
                     _ => None,
                 };
+    
+                let game_state = game.to_string();
+    
+                // Retrieve the players based on the playing_game_id
+                let game_players: Vec<Player> = players
+                    .values()
+                    .filter(|player| player.playing_game_id == Some(game_id))
+                    .cloned()
+                    .collect();
+    
                 warp::reply::json(&GameResponse {
-                    game_state: game.to_string(),
+                    game_state,
                     game_id,
                     game_over,
                     winner,
+                    players: game_players,
                 })
             } else {
                 warp::reply::json(&ErrorResponse {
@@ -140,6 +181,7 @@ async fn main() {
                 })
             }
         });
+    
 
     let join_game = warp::path!("join_game")
         .and(warp::post())
@@ -171,36 +213,35 @@ async fn main() {
                 player.playing_game_id = Some(game_id);
                 opponent.playing_game_id = Some(game_id);
     
-                warp::reply::with_header(warp::reply::json(&GameResponse {
-                    game_state: games.get(&game_id).unwrap().to_string(),
-                    game_id,
-                    game_over: false,
-                    winner: None,
-                }), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
+                // Retrieve the players based on the playing_game_id
+                let game_players: Vec<Player> = players
+                    .values()
+                    .filter(|p| p.playing_game_id == Some(game_id))
+                    .cloned()
+                    .collect();
+    
+                warp::reply::with_header(
+                    warp::reply::json(&GameResponse {
+                        game_state: games.get(&game_id).unwrap().to_string(),
+                        game_id,
+                        game_over: false,
+                        winner: None,
+                        players: game_players,
+                    }),
+                    "Access-Control-Allow-Origin",
+                    "https://tictac.thencandesigns.com",
+                )
             } else {
-                warp::reply::with_header(warp::reply::json(&ErrorResponse {
-                    error: String::from("Player or opponent not found"),
-                }), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
+                warp::reply::with_header(
+                    warp::reply::json(&ErrorResponse {
+                        error: String::from("Player or opponent not found"),
+                    }),
+                    "Access-Control-Allow-Origin",
+                    "https://tictac.thencandesigns.com",
+                )
             }
-        });    
-
-    // let handle_game_request = warp::path!("handle_game_request")
-    //     .and(warp::post())
-    //     .and(warp::body::json())
-    //     .map(|game_request_response: GameRequestResponse| {
-    //         let mut players = PLAYERS.lock().unwrap();
-    //         let mut player_requests = PLAYER_REQUESTS.lock().unwrap();
-    
-    //         if let Some(requesting_player) = players.get_mut(&game_request_response.player_id) {
-    //             requesting_player.requested_game_id = Some(game_request_response.game_id);
-    //             let requests = player_requests.entry(game_request_response.game_id).or_insert(Vec::new());
-    //             requests.push(requesting_player.id);
-    
-    //             warp::reply::with_header(warp::reply::json(&RequestResponse::Approve), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
-    //         } else {
-    //             warp::reply::with_header(warp::reply::json(&RequestResponse::Deny), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
-    //         }
-    //     });
+        });
+      
         
     let get_players = warp::path!("players")
         .and(warp::get())
@@ -224,7 +265,6 @@ async fn main() {
         .or(game_state)
         .or(join_game)
         .or(request_game)
-        // .or(handle_game_request)
         .or(get_players)
         .with(cors);
 
