@@ -1,5 +1,6 @@
 {
     "rust-analyzer.linkedProjects": [
+        "./footbored/Cargo.toml",
         "./footbored/Cargo.toml"
     ]
 }
