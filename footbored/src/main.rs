@@ -36,7 +36,7 @@ struct ErrorResponse {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Player {
-    id: Uuid,
+    id: Option<Uuid>,
     name: String,
     requested_game_id: Option<Uuid>,
     playing_game_id: Option<Uuid>,
@@ -135,18 +135,14 @@ async fn main() {
     let join_game = warp::path!("join_game")
         .and(warp::post())
         .and(warp::body::json())
-        .map(|player: Player| {
+        .map(|mut player: Player| {
             let mut players = PLAYERS.lock().unwrap();
             let player_id = Uuid::new_v4();
-            let new_player = Player {
-                id: player_id,
-                name: player.name,
-                requested_game_id: None,
-                playing_game_id: None,
-            };
-            players.insert(player_id, new_player);
-            warp::reply::json(&player_id)
+            player.id = Some(player_id);
+            players.insert(player_id, player.clone());
+            warp::reply::json(&player)
         });
+    
     
     
 
