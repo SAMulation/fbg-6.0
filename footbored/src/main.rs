@@ -135,18 +135,19 @@ async fn main() {
     let join_game = warp::path!("join_game")
         .and(warp::post())
         .and(warp::body::json())
-        .map(|player_name: String| {
+        .map(|player: Player| {
             let mut players = PLAYERS.lock().unwrap();
             let player_id = Uuid::new_v4();
-            let player = Player {
+            let new_player = Player {
                 id: player_id,
-                name: player_name,  // Set the player's name
+                name: player.name,
                 requested_game_id: None,
                 playing_game_id: None,
             };
-            players.insert(player_id, player);
+            players.insert(player_id, new_player);
             warp::reply::json(&player_id)
         });
+    
     
 
     let request_game = warp::path!("request_game")
