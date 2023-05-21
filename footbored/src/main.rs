@@ -193,13 +193,14 @@ async fn main() {
     //         }
     //     });
         
-    let get_players = warp::path("players")
+    let get_players = warp::path!("players")
         .and(warp::get())
         .map(|| {
             let players = PLAYERS.lock().unwrap();
-            let player_names: Vec<String> = players.values().map(|player| player.name.clone()).collect();
-            warp::reply::json(&player_names)
+            let player_list: Vec<&Player> = players.values().collect();
+            warp::reply::json(&player_list)
         });
+
 
     let cors = warp::cors()
         .allow_origins(vec![
