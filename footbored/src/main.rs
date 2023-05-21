@@ -21,6 +21,14 @@ struct MovePosition {
     y: usize,
 }
 
+#[derive(Deserialize)]
+struct MoveData {
+    player_id: Uuid,
+    x: usize,
+    y: usize,
+}
+
+
 #[derive(Serialize)]
 struct GameResponse {
     game_state: String,
@@ -80,10 +88,10 @@ async fn main() {
     let make_move = warp::path!("game" / Uuid / "move")
         .and(warp::filters::method::post())
         .and(warp::body::json())
-        .map(|game_id: Uuid, move_position: MovePosition| {
+        .map(|game_id: Uuid, move_data: MoveData| {
             let mut games = GAMES.lock().unwrap();
             if let Some(game) = games.get_mut(&game_id) {
-                if game.play(move_position.x, move_position.y) {
+                if game.play(move_data.player_id, move_data.x, move_data.y) {
                     let game_over = game.is_over();
                     let winner = match game.get_winner() {
                         Some(Cell::X) => Some("X".to_string()),
@@ -107,6 +115,7 @@ async fn main() {
                 })
             }
         });
+    
 
     let game_state = warp::path!("game" / Uuid / "state")
         .and(warp::get())
