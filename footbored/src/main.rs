@@ -13,7 +13,6 @@ use game::{Game, Cell};
 lazy_static! {
     static ref GAMES: Arc<Mutex<HashMap<Uuid, Game>>> = Arc::new(Mutex::new(HashMap::new()));
     static ref PLAYERS: Arc<Mutex<HashMap<Uuid, Player>>> = Arc::new(Mutex::new(HashMap::new()));
-    static ref PLAYER_REQUESTS: Arc<Mutex<HashMap<Uuid, Vec<Uuid>>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 #[derive(Deserialize)]
@@ -47,7 +46,6 @@ struct Player {
 struct GameRequest {
     player_id: Uuid,
     opponent_id: Uuid,
-    game_id: Uuid,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -156,40 +154,47 @@ async fn main() {
         .and(warp::body::json())
         .map(|game_request: GameRequest| {
             let mut players = PLAYERS.lock().unwrap();
-            let mut player_requests = PLAYER_REQUESTS.lock().unwrap();
-
-            if let Some(requesting_player) = players.get_mut(&game_request.player_id) {
-                requesting_player.requested_game_id = Some(game_request.game_id);
-                let requests = player_requests.entry(game_request.game_id).or_insert(Vec::new());
-                requests.push(requesting_player.id);
-
-                warp::reply::with_header(warp::reply::json(&RequestResponse::Approve), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
+            let mut games = GAMES.lock().unwrap();
+            let mut cloned_players = players.clone();
+            let player = players.get_mut(&game_request.player_id);
+            let opponent = cloned_players.get_mut(&game_request.opponent_id);
+    
+            if let (Some(player), Some(opponent)) = (player, opponent) {
+                let game_id = Uuid::new_v4();
+                games.insert(game_id, Game::new());
+                player.playing_game_id = Some(game_id);
+                opponent.playing_game_id = Some(game_id);
+    
+                warp::reply::with_header(warp::reply::json(&GameResponse {
+                    game_state: games.get(&game_id).unwrap().to_string(),
+                    game_id,
+                    game_over: false,
+                    winner: None,
+                }), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
             } else {
-                warp::reply::with_header(warp::reply::json(&RequestResponse::Deny), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
+                warp::reply::with_header(warp::reply::json(&ErrorResponse {
+                    error: String::from("Player or opponent not found"),
+                }), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
             }
-        });
+        });    
 
-
-
+    // let handle_game_request = warp::path!("handle_game_request")
+    //     .and(warp::post())
+    //     .and(warp::body::json())
+    //     .map(|game_request_response: GameRequestResponse| {
+    //         let mut players = PLAYERS.lock().unwrap();
+    //         let mut player_requests = PLAYER_REQUESTS.lock().unwrap();
     
-
-    let handle_game_request = warp::path!("handle_game_request")
-        .and(warp::post())
-        .and(warp::body::json())
-        .map(|game_request_response: GameRequestResponse| {
-            let mut players = PLAYERS.lock().unwrap();
-            let mut player_requests = PLAYER_REQUESTS.lock().unwrap();
+    //         if let Some(requesting_player) = players.get_mut(&game_request_response.player_id) {
+    //             requesting_player.requested_game_id = Some(game_request_response.game_id);
+    //             let requests = player_requests.entry(game_request_response.game_id).or_insert(Vec::new());
+    //             requests.push(requesting_player.id);
     
-            if let Some(requesting_player) = players.get_mut(&game_request_response.player_id) {
-                requesting_player.requested_game_id = Some(game_request_response.game_id);
-                let requests = player_requests.entry(game_request_response.game_id).or_insert(Vec::new());
-                requests.push(requesting_player.id);
-    
-                warp::reply::with_header(warp::reply::json(&RequestResponse::Approve), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
-            } else {
-                warp::reply::with_header(warp::reply::json(&RequestResponse::Deny), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
-            }
-        });
+    //             warp::reply::with_header(warp::reply::json(&RequestResponse::Approve), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
+    //         } else {
+    //             warp::reply::with_header(warp::reply::json(&RequestResponse::Deny), "Access-Control-Allow-Origin", "https://tictac.thencandesigns.com")
+    //         }
+    //     });
         
     let get_players = warp::path("players")
         .and(warp::get())
@@ -212,7 +217,7 @@ async fn main() {
         .or(game_state)
         .or(join_game)
         .or(request_game)
-        .or(handle_game_request)
+        // .or(handle_game_request)
         .or(get_players)
         .with(cors);
 
