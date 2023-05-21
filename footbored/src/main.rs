@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use serde_derive::{Serialize, Deserialize};
-use warp::{self, Filter};
+use warp::{self, Filter, log};
 
 mod game;
 use game::{Game, Cell};
@@ -106,6 +106,7 @@ async fn main() {
                 })
             }
         });
+
 
     let make_move = warp::path!("game" / Uuid / "move")
         .and(warp::filters::method::post())
@@ -238,13 +239,28 @@ async fn main() {
         .allow_methods(vec!["POST", "GET"])
         .allow_headers(vec!["Content-Type"]);
 
+    let log = warp::log::custom(|info| {
+        // Custom log format
+        println!(
+            "Host: {}, Method: {}, Path: {}, Status: {}, User-Agent: {}, Time: {}",
+            info.host().unwrap_or("unknown host"),
+            info.method(),
+            info.path(),
+            info.status().as_u16(),
+            info.user_agent().unwrap_or("unknown user_agent"),
+            // You can also add the timestamp
+            info.elapsed().as_secs_f64()
+        );
+    });
+    
     let routes = new_game
         .or(make_move)
         .or(game_state)
         .or(join_game)
         .or(request_game)
         .or(get_players)
-        .with(cors);
+        .with(cors)
+        .with(log);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
