@@ -1,7 +1,5 @@
 use std::fmt;
-use std::collections::HashMap;
 use uuid::Uuid;
-use serde_derive::{Serialize, Deserialize};
 
 const SIZE: usize = 3;
 
@@ -25,58 +23,45 @@ impl fmt::Display for Cell {
 type Board = [[Cell; SIZE]; SIZE];
 
 pub struct Game {
-    board: Board,
-    current_player: Cell,
-    players: HashMap<Uuid, Cell>,
-    winner: Option<Cell>,
-    draw: bool,
+    pub board: Board,
+    pub current_player: Cell,
+    pub players: Vec<Uuid>,
+    pub winner: Option<Cell>,
+    pub draw: bool,
 }
 
 impl Game {
-    pub fn new() -> Self {
+    pub fn new(player1_id: Uuid, player2_id: Uuid) -> Self {
         Game {
             board: [[Cell::Empty; SIZE]; SIZE],
             current_player: Cell::X,
-            players: HashMap::new(),
+            players: vec![player1_id, player2_id],
             winner: None,
             draw: false,
         }
     }
 
-    pub fn add_player(&mut self, player_id: Uuid) {
-        if self.players.len() >= 2 {
-            panic!("Game is already full");
+    pub fn play(&mut self, player_id: Uuid, x: usize, y: usize) -> bool {
+        if player_id != self.current_player_id() {
+            return false;
         }
 
-        let cell = match self.players.len() {
-            0 => Cell::X,
-            1 => Cell::O,
-            _ => unreachable!(),
-        };
+        if self.board[x][y] != Cell::Empty {
+            return false;
+        }
 
-        self.players.insert(player_id, cell);
+        self.board[x][y] = self.current_player;
+        self.check_game_state(x, y);
+        self.current_player = match self.current_player {
+            Cell::X => Cell::O,
+            Cell::O => Cell::X,
+            _ => panic!("Invalid player"),
+        };
+        true
     }
 
-    pub fn play(&mut self, player_id: Uuid, x: usize, y: usize) -> bool {
-        if let Some(&cell) = self.players.get(&player_id) {
-            if cell == self.current_player {
-                if self.board[x][y] != Cell::Empty {
-                    return false;
-                }
-                self.board[x][y] = self.current_player;
-                self.check_game_state(x, y);
-                self.current_player = match self.current_player {
-                    Cell::X => Cell::O,
-                    Cell::O => Cell::X,
-                    _ => panic!("Invalid player"),
-                };
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
+    pub fn current_player_id(&self) -> Uuid {
+        self.players[self.current_player as usize - 1]
     }
 
     pub fn check_game_state(&mut self, x: usize, y: usize) {
@@ -147,24 +132,4 @@ impl fmt::Display for Game {
         }
         Ok(())
     }
-}
-
-#[derive(Deserialize)]
-pub struct MoveData {
-    pub player_id: Uuid,
-    pub x: usize,
-    pub y: usize,
-}
-
-#[derive(Serialize)]
-pub struct GameResponse {
-    pub game_state: String,
-    pub game_id: Uuid,
-    pub game_over: bool,
-    pub winner: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
 }
