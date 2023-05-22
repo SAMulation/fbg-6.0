@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use log::info;
+use tokio::sync::broadcast;
+
 
 #[derive(Debug)]
 pub struct Player {
@@ -44,12 +46,21 @@ impl Lobby {
         println!("Game request sent from {:?} to {:?}", request.from, request.to);
     }
 
-    pub fn broadcast_message(&self, message: String) {
-        // Add logic to broadcast the message to all players in the lobby
-        // For now, let's just print the message for each player
-        for player in self.players.values() {
-            println!("Broadcasting message to player {:?}: {}", player.id, message);
+    pub async fn broadcast_message(&self, message: String, clients: &Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>) {
+        // Obtain a clone of the clients' MutexGuard
+        let guard = clients.lock().await.clone();
+        for client in guard.values() {
+            // Ignore any errors that occur while sending the message
+            let _ = client.send(message.clone());
         }
+    }
+    
+    
+    
+    
+    
+    pub fn join_lobby(&mut self, player: Player) {
+        self.players.insert(player.id, player);
     }
 }
 

@@ -2,10 +2,9 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use warp::Filter;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 use log::info;
 use crate::websocket::{handle_connection};
-use crate::lobby::{Lobby, start_lobby};
+use crate::lobby::start_lobby;
 
 pub async fn start_server() {
     // Create a shared state of connected clients
