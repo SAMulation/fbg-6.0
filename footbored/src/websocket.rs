@@ -53,6 +53,7 @@ async fn handle_message(
         match result {
             Ok(message) => {
                 if let Ok(text) = message.to_str() {
+                    info!("Received message from client {}: {}", client_id, text);
                     if text.starts_with("/message ") {
                         let chat_message = text.trim_start_matches("/message ").to_string();
                         lobby.lock().await.broadcast_message(chat_message, &clients).await;
