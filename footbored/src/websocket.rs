@@ -23,12 +23,15 @@ pub async fn handle_connection(
     let handle_message_task = spawn(handle_message(client_id, client_ws_rx, Arc::clone(&clients), Arc::new(Mutex::new(client_ws_tx)), Arc::clone(&lobby), Arc::clone(&running)));
     let handle_send_task = spawn(handle_send(client_id, Arc::clone(&clients)));
 
-    tokio::select! {
-        _ = handle_message_task => (),
-        _ = handle_send_task => (),
-    }
+    let result = tokio::try_join!(handle_message_task, handle_send_task);
 
+    match result {
+        Ok(_) => info!("Both tasks completed successfully for client {}", client_id),
+        Err(e) => warn!("One of the tasks for client {} returned an error: {}", client_id, e),
+    }
+    
     cleanup_connection(client_id, clients, running).await;
+    
 }
 
 async fn initialize_connection(
@@ -88,24 +91,31 @@ async fn handle_message(
 }
 
 
-async fn handle_send(
-    client_id: Uuid,
-    clients: Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>,
-) {
-    let mut broadcast_receiver = clients.lock().await[&client_id].subscribe();
-    while let Ok(message) = broadcast_receiver.recv().await {
-        for (id, client_ws_tx) in clients.lock().await.iter() {
-            // Don't send the message to the sender
-            if *id != client_id {
-                if let Err(e) = client_ws_tx.send(message.clone()) {
-                    error!("Failed to send message: {}", e);
-                    break;
-                }
+async fn handle_send(client_id: Uuid, clients: Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>) {
+    let mut receiver = {
+        let guard = clients.lock().await;
+        guard.get(&client_id).unwrap().subscribe()
+    };
+
+    while let Ok(message) = receiver.recv().await {
+        let client = {
+            let guard = clients.lock().await;
+            guard.get(&client_id).cloned()
+        };
+
+        if let Some(client) = client {
+            match client.send(message.clone()) {
+                Ok(_) => info!("Sent message to client {}: {}", client_id, message),
+                Err(e) => error!("Failed to send message: {}", e),
             }
+        } else {
+            warn!("Client {} has disconnected", client_id);
+            break;
         }
     }
-}
 
+    info!("Ending send task for client {}", client_id);
+}
 
 async fn handle_join_lobby(
     message: &str,
@@ -173,7 +183,3 @@ pub async fn handle_players(
         }
     }
 }
-
-
-
-
