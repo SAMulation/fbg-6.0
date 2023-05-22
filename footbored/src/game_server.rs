@@ -4,20 +4,25 @@ use warp::Filter;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use log::info;
-use crate::websocket::handle_connection;
+use crate::websocket::{handle_connection};
+use crate::lobby::{Lobby, start_lobby};
 
 pub async fn start_server() {
     // Create a shared state of connected clients
     let clients = Arc::new(Mutex::new(HashMap::new()));
+
+    // Start the lobby
+    let lobby = start_lobby().await;
 
     // Define WebSocket routes
     let routes = warp::path("ws")
         .and(warp::ws())
         .map(move |ws: warp::ws::Ws| {
             let clients = clients.clone();
+            let lobby = lobby.clone();
             // Upgrade HTTP connection to WebSocket and handle it
             ws.on_upgrade(move |websocket| {
-                handle_connection(websocket, clients.clone())
+                handle_connection(websocket, clients.clone(), lobby.clone())
             })
         });
 

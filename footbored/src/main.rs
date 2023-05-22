@@ -2,6 +2,7 @@ use log::info;
 
 mod game_server;
 mod websocket;
+mod lobby;
 
 #[tokio::main]
 async fn main() {
