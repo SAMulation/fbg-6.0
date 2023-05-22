@@ -57,7 +57,7 @@ async fn handle_message(
             Ok(message) => {
                 if let Ok(text) = message.to_str() {
                     info!("Received message from client {}: {}", client_id, text);
-                    if text.starts_with("/message ") {
+                    if text.starts_with("/message") {
                         let chat_message = text.trim_start_matches("/message ").to_string();
                         lobby.lock().await.broadcast_message(chat_message, &clients).await;
                     }
@@ -91,7 +91,10 @@ async fn handle_message(
 }
 
 
-async fn handle_send(client_id: Uuid, clients: Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>) {
+pub async fn handle_send(
+    client_id: Uuid,
+    clients: Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>
+) {
     let mut receiver = {
         let guard = clients.lock().await;
         guard.get(&client_id).unwrap().subscribe()
