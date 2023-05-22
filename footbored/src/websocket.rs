@@ -53,10 +53,11 @@ async fn handle_message(
         match result {
             Ok(message) => {
                 if let Ok(text) = message.to_str() {
-                    if text.starts_with("/message") {
-                        let chat_message = text.to_string();
+                    if text.starts_with("/message ") {
+                        let chat_message = text.trim_start_matches("/message ").to_string();
                         lobby.lock().await.broadcast_message(chat_message, &clients).await;
-                    } else if text.starts_with("/request_game") {
+                    }
+                     else if text.starts_with("/request_game") {
                         // Placeholder for requesting a game
                     } else if text.starts_with("/leave_lobby") {
                         let player_id = text.trim_start_matches("/leave_lobby").trim().parse::<Uuid>();
@@ -92,14 +93,18 @@ async fn handle_send(
 ) {
     let mut broadcast_receiver = clients.lock().await[&client_id].subscribe();
     while let Ok(message) = broadcast_receiver.recv().await {
-        if let Some(client_ws_tx) = clients.lock().await.get_mut(&client_id) {
-            if let Err(e) = client_ws_tx.send(message) {
-                error!("Failed to send message: {}", e);
-                break;
-            }            
+        for (id, client_ws_tx) in clients.lock().await.iter() {
+            // Don't send the message to the sender
+            if *id != client_id {
+                if let Err(e) = client_ws_tx.send(message.clone()) {
+                    error!("Failed to send message: {}", e);
+                    break;
+                }
+            }
         }
     }
 }
+
 
 async fn handle_join_lobby(
     message: &str,
